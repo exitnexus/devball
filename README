@@ -1,0 +1,7 @@
+DevBall Builder
+---
+This is a tool for building a devball. A devball is a self-contained set of packages that can be portably be moved from one binary-compatible machine to another.
+
+Usage
+---
+(tbd)
