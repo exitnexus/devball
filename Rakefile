@@ -1,9 +1,11 @@
 require 'rubygems'
 require 'rake/gempackagetask'
 
+GEM_VERSION = ENV['GEM_VERSION'] || `git describe`.gsub(/-([0-9]+)-[a-z0-9]+$/, '.\1')
+
 spec = Gem::Specification.new do |s|
     s.name       = "devball"
-    s.version    = '0.1'
+    s.version    = GEM_VERSION
     s.author     = "Graham Batty"
     s.email      = "graham at nexopia dot com"
     s.homepage   = "http://github.com/nexopia/devball"
