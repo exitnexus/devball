@@ -1,0 +1,164 @@
+#!/usr/bin/env ruby
+# Builds our package environment based on the .pkgspec files in packages
+
+Dir["lib/*.rb"].sort.each {|f|
+	require f
+}
+
+should_clean = false
+clean_build_dirs = true
+explicit_packages = nil
+build = true
+force = false
+only = false
+
+push = false
+push_username = nil
+pull = false
+rsync_build = nil
+
+ARGV.each {|arg|
+	if (match = /^--([^=]+)(=(.*))?$/.match(arg))
+		case match[1]
+		when "clean-install" # remove /nexopia/* before starting to give a clean slate
+			should_clean = true
+		when "leave-build-dirs" # remove build directories after they're installed
+			clean_build_dirs = false
+		when "no-build" # don't build
+			build = false
+		when "only" # only build the packages specified on the command line, don't build their deps
+			only = true
+		when "force" # build all elligable packages, even if they're already installed.
+			force = true
+		when "push"
+			if (!match[3])
+				raise "Must specify a build to push"
+			end
+			rsync_build = match[3]
+			push = true
+		when "username"
+			if (!match[3])
+				raise "Must specify a username"
+			end
+			push_username = match[3]
+		when "pull"
+			if (!match[3])
+				raise "Must specify a build to pull"
+			end
+			rsync_build = match[3]
+			pull = true
+			build = false
+		end
+	else
+		explicit_packages ||= []
+		if (regex_match = /^\/(.*)\/$/.match(arg))
+			explicit_packages.push(Regexp.new(regex_match[1]))
+		else
+			explicit_packages.push(arg)
+		end
+		make_tarball = false # don't build a tarball if we're building only partial
+	end
+}
+
+$build_dir = ENV['BUILD_DIR'] || 'build'
+
+if (build)
+	packages = PkgSpec.load_packages("packages", explicit_packages, only);
+	if (!force)
+		packages.delete_if {|pkg| File.directory?("/nexopia/packages/#{pkg}") }
+	end
+	puts("Installing packages: #{packages.join(', ')}")
+
+	if (!system("mkdir", "-p", $build_dir))
+		puts("Could not create build directory.")
+		exit(150)
+	end
+
+	if (File.exists?("/nexopia") && should_clean)
+		system("rm", "-rf", "/nexopia/*")
+	end
+
+	if (!system("sudo", "mkdir", "-p", "/nexopia"))
+		puts("Could not create target directory.")
+		exit(250)
+	end
+
+	if (!system("sudo", "chown", "#{ENV['USER']}:", "/nexopia"))
+		puts("Could not change ownership of target directory.")
+		exit(275)
+	end
+
+	# commonly needed environment variables.
+	ENV['CFLAGS'] = (ENV['CFLAGS'] || "") + " -I/nexopia/include -fPIC"
+	ENV['CXXFLAGS'] = (ENV['CXXFLAGS'] || "") + " -I/nexopia/include -fPIC"
+	ENV['LDFLAGS'] = (ENV['LDFLAGS'] || "") + " -L/nexopia/lib -fPIC"
+	ENV['PATH'] = '/nexopia/bin:' + (ENV['PATH'] || "")
+	ENV['RUBYOPT'] = '' # clear this out. It blows stuff up.
+
+	packages.each {|package|
+		package.remove_build()
+		related_pkgs = []
+		begin
+			puts("Extracting #{package}")
+			package.step_extract()
+			puts("Patching #{package}")
+			package.step_patch()
+			puts("Setting environment for #{package}")
+			package.step_environment_setup()
+			puts("Configuring #{package}")
+			package.step_configure()
+			puts("Building #{package}")
+			package.step_build()
+			puts("Installing #{package}")
+			package.remove_install()
+			begin
+				FileUtils.mkdir_p(package.package_install_dir) # precreate the package directory so it always exists.
+				related_pkgs = package.step_install()
+			rescue Exception
+				puts("Error installing #{package}. Cleaning up the install dir.")
+				package.remove_install()
+				system("rm", "-rf", package.package_install_dir)
+				raise
+			end
+		ensure
+			if (clean_build_dirs)
+				puts("Removing build directory for #{package}")
+				package.remove_build()
+			end
+		end
+		puts("Setting up links for #{package}")
+		package.step_setup_links()
+		if (related_pkgs.kind_of?(Array))
+			related_pkgs.each {|related|
+				PkgSpec.find(related).step_setup_links()
+			}
+		end
+	}
+
+	puts("Done installing packages #{packages.join(', ')}.")
+end
+if (push)
+	puts("Pushing devball to rsync server (will ask for your officebackup password)")
+	if (!push_username)
+		push_username = ENV['USER']
+		puts("No username specified (with --username), using system default of #{ENV['USER']}")
+	end
+	system("rsync", "-a", "--delete", "/nexopia/packages", "rsync://#{push_username}@officebackup/write-#{rsync_build}")
+end
+	
+if (pull)
+	puts("Pulling devball from rsync server")
+	system("rsync", "-a", "--delete", "rsync://officebackup/#{rsync_build}", "/nexopia")
+	
+	# now take the list of packages we pulled down, load their package objects, and setup links.
+	packages = PkgSpec.load_packages("packages", nil, false);
+	Dir["/nexopia/packages/*"].each {|pkg_name|
+		pkg_name = %r{/([^/]+)$}.match(pkg_name)[1]
+		package = PkgSpec.find(pkg_name)
+		if (!package)
+			raise "Unknown package #{pkg_name} pulled from devball server."
+		end
+		puts("Setting up links for #{pkg_name}")
+		package.step_setup_links()
+	}
+end
