@@ -2,6 +2,7 @@
 # Builds our package environment based on the .pkgspec files in packages
 
 require 'optparse'
+require 'yaml'
 require 'devball/pkgspec/base'
 
 module DevBall
@@ -20,7 +21,7 @@ module DevBall
 	$build_dir = "/tmp/devball-build"
 	$install_base = nil
 
-	OptionParser.new do |opts|
+	opts = OptionParser.new do |opts|
 		opts.banner = "Usage: #{$0} [options] package_dir"
 	
 		opts.on("-b", "--build-dir BUILD_DIR", "Specify where to use as a scratch directory for building. Defaults to /tmp/devball-build") do |build_dir|
@@ -65,10 +66,19 @@ module DevBall
 			puts opts
 			exit(0)
 		end
-	end.parse!(ARGV)
+	end
+	
+	opts.parse!(ARGV)
 
-	$package_dir = ARGV.shift || raise(ArgumentError, "No package directory specified.")
-	$install_base = "/#{$package_dir}"
+	$package_dir = ARGV.shift || raise(ArgumentError, "No package bundle directory named.")
+	$package_name = File.basename($package_dir)
+	
+	if (File.exists? "#{$package_dir}/config.yaml")
+		config = YAML.load_file("#{$package_dir}/config.yaml")
+		$package_name = config[:package_name] || $package_name
+	end
+
+	$install_base = "/#{$package_name}"
 
 	if (build)
 		packages = PkgSpec::Base.load_packages($package_dir, explicit_packages, only);
