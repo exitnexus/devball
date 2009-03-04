@@ -4,6 +4,7 @@
 require 'optparse'
 require 'yaml'
 require 'devball/pkgspec/base'
+require 'devball/initialization'
 
 module DevBall
 	should_clean = false
@@ -19,11 +20,8 @@ module DevBall
 	rsync_build = nil
 
 	$build_dir = "/tmp/devball-build"
-	$install_base = nil
 
-	opts = OptionParser.new do |opts|
-		opts.banner = "Usage: #{$0} [options] package_dir"
-	
+	configure do |opts|
 		opts.on("-b", "--build-dir BUILD_DIR", "Specify where to use as a scratch directory for building. Defaults to /tmp/devball-build") do |build_dir|
 			$build_dir = build_dir
 		end	
@@ -33,7 +31,7 @@ module DevBall
 		opts.on("-L", "--leave-build-dirs", "Leave intermediate build directories alone after installing (for debugging)") do
 			clean_build_dirs = false
 		end
-		opts.on("-N", "--no-build", "Don't actually build the devball.") do
+		opts.on("-N", "--no-build", "Don't actually build the devball, just list what would be built.") do
 			build = false
 		end
 		opts.on("-o", "--only PKGNAME,PKGNAME,PKGNAME...", "Only build the packages specified on the command line (but not their deps)") do |pkgnames|
@@ -61,121 +59,80 @@ module DevBall
 		opts.on("-p", "--pull RSYNC_SERVER", "Pull a devball from the given rsync server and build name specified in -n.") do |rsync_server|
 			pull = rsync_server
 		end
-		
-		opts.on("-h", "--help", "Show help screen") do
-			puts opts
-			exit(0)
-		end
 	end
 	
-	opts.parse!(ARGV)
+	packages = PkgSpec::Base.load_packages($package_dir, explicit_packages, only);
+	if (!force)
+		packages.delete_if {|pkg| File.directory?("#{$install_base}/packages/#{pkg}") }
+	end
+	puts("Installing packages: #{packages.join(', ')}")
+	puts("Into #{$install_base}")
 
-	$package_dir = ARGV.shift || raise(ArgumentError, "No package bundle directory named.")
-	$package_name = File.basename($package_dir)
-	
-	if (File.exists? "#{$package_dir}/config.yaml")
-		config = YAML.load_file("#{$package_dir}/config.yaml")
-		$package_name = config[:package_name] || $package_name
+	exit(0) if (!build)
+
+	if (!system("mkdir", "-p", $build_dir))
+		puts("Could not create build directory.")
+		exit(150)
 	end
 
-	$install_base = "/#{$package_name}"
+	if (File.exists?($install_base) && should_clean)
+		system("rm", "-rf", "#{$install_base}/*")
+	end
 
-	if (build)
-		packages = PkgSpec::Base.load_packages($package_dir, explicit_packages, only);
-		if (!force)
-			packages.delete_if {|pkg| File.directory?("#{$install_base}/packages/#{pkg}") }
-		end
-		puts("Installing packages: #{packages.join(', ')}")
+	if (!system("mkdir", "-p", $install_base))
+		puts("Could not create target directory.")
+		puts("You will probably need to create the directory and set permissions yourself by running:")
+		puts("sudo mkdir -p #{$install_base}")
+		puts("sudo chown #{ENV['USER']}: #{$install_base}")
+		exit(250)
+	end
 
-		if (!system("mkdir", "-p", $build_dir))
-			puts("Could not create build directory.")
-			exit(150)
-		end
+	# commonly needed environment variables.
+	ENV['CFLAGS'] = (ENV['CFLAGS'] || "") + " -I#{$install_base}/include -fPIC"
+	ENV['CXXFLAGS'] = (ENV['CXXFLAGS'] || "") + " -I#{$install_base}/include -fPIC"
+	ENV['LDFLAGS'] = (ENV['LDFLAGS'] || "") + " -L#{$install_base}/lib -fPIC"
+	ENV['PATH'] = "#{$install_base}/bin:" + (ENV['PATH'] || "")
+	ENV['RUBYOPT'] = '' # clear this out. It blows stuff up.
 
-		if (File.exists?($install_base) && should_clean)
-			system("rm", "-rf", "#{$install_base}/*")
-		end
-
-		if (!system("mkdir", "-p", $install_base))
-			puts("Could not create target directory.")
-			puts("You will probably need to create the directory and set permissions yourself by running:")
-			puts("sudo mkdir -p #{$install_base}")
-			puts("sudo chown #{ENV['USER']}: #{$install_base}")
-			exit(250)
-		end
-
-		# commonly needed environment variables.
-		ENV['CFLAGS'] = (ENV['CFLAGS'] || "") + " -I#{$install_base}/include -fPIC"
-		ENV['CXXFLAGS'] = (ENV['CXXFLAGS'] || "") + " -I#{$install_base}/include -fPIC"
-		ENV['LDFLAGS'] = (ENV['LDFLAGS'] || "") + " -L#{$install_base}/lib -fPIC"
-		ENV['PATH'] = "#{$install_base}/bin:" + (ENV['PATH'] || "")
-		ENV['RUBYOPT'] = '' # clear this out. It blows stuff up.
-
-		packages.each {|package|
-			package.remove_build()
-			related_pkgs = []
+	packages.each {|package|
+		package.remove_build()
+		related_pkgs = []
+		begin
+			puts("Extracting #{package}")
+			package.step_extract()
+			puts("Patching #{package}")
+			package.step_patch()
+			puts("Setting environment for #{package}")
+			package.step_environment_setup()
+			puts("Configuring #{package}")
+			package.step_configure()
+			puts("Building #{package}")
+			package.step_build()
+			puts("Installing #{package}")
+			package.remove_install()
 			begin
-				puts("Extracting #{package}")
-				package.step_extract()
-				puts("Patching #{package}")
-				package.step_patch()
-				puts("Setting environment for #{package}")
-				package.step_environment_setup()
-				puts("Configuring #{package}")
-				package.step_configure()
-				puts("Building #{package}")
-				package.step_build()
-				puts("Installing #{package}")
+				FileUtils.mkdir_p(package.package_install_dir) # precreate the package directory so it always exists.
+				related_pkgs = package.step_install()
+			rescue Exception
+				puts("Error installing #{package}. Cleaning up the install dir.")
 				package.remove_install()
-				begin
-					FileUtils.mkdir_p(package.package_install_dir) # precreate the package directory so it always exists.
-					related_pkgs = package.step_install()
-				rescue Exception
-					puts("Error installing #{package}. Cleaning up the install dir.")
-					package.remove_install()
-					system("rm", "-rf", package.package_install_dir)
-					raise
-				end
-			ensure
-				if (clean_build_dirs)
-					puts("Removing build directory for #{package}")
-					package.remove_build()
-				end
+				system("rm", "-rf", package.package_install_dir)
+				raise
 			end
-			puts("Setting up links for #{package}")
-			package.step_setup_links()
-			if (related_pkgs.kind_of?(Array))
-				related_pkgs.each {|related|
-					PkgSpec::Base.find(related).step_setup_links()
-				}
+		ensure
+			if (clean_build_dirs)
+				puts("Removing build directory for #{package}")
+				package.remove_build()
 			end
-		}
-
-		puts("Done installing packages #{packages.join(', ')}.")
-	end
-	if (push)
-		puts("Pushing devball to rsync server (will ask for your officebackup password)")
-		if (!push_username)
-			push_username = ENV['USER']
-			puts("No username specified (with --username), using system default of #{ENV['USER']}")
 		end
-		system("rsync", "-a", "--delete", "#{$install_base}/packages", "rsync://#{push_username}@officebackup/write-#{rsync_build}")
-	end
-	
-	if (pull)
-		puts("Pulling devball from rsync server")
-		system("rsync", "-a", "--delete", "rsync://officebackup/#{rsync_build}", "#{$install_base}")
-	
-		# now take the list of packages we pulled down, load their package objects, and setup links.
-		packages = PkgSpec::Base.load_packages($package_dir, nil, false);
-		Dir["#{$install_base}/packages/*"].each {|pkg_name|
-			pkg_name = %r{/([^/]+)$}.match(pkg_name)[1]
-			package = PkgSpec::Base.find(pkg_name)
-			if (!package)
-				raise "Unknown package #{pkg_name} pulled from devball server."
-			end
-			puts("Setting up links for #{pkg_name}")
-			package.step_setup_links()
-		}
-	end
+		puts("Setting up links for #{package}")
+		package.step_setup_links()
+		if (related_pkgs.kind_of?(Array))
+			related_pkgs.each {|related|
+				PkgSpec::Base.find(related).step_setup_links()
+			}
+		end
+	}
+
+	puts("Done installing packages #{packages.join(', ')}.")
 end
