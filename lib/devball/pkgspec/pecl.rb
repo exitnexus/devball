@@ -15,7 +15,7 @@ module DevBall
 			end
 	
 			def step_install()
-				Dir.chdir("packages") {|dir|
+				Dir.chdir($package_dir) {|dir|
 					if(!system("pecl", "install", ball()))
 						raise(InstallFailed, "Could not install pecl package: #{$?}")
 					end

@@ -1,164 +1,166 @@
 #!/usr/bin/env ruby
 # Builds our package environment based on the .pkgspec files in packages
 
-Dir["lib/*.rb"].sort.each {|f|
-	require f
-}
+require 'optparse'
+require 'devball/pkgspec/base'
 
-should_clean = false
-clean_build_dirs = true
-explicit_packages = nil
-build = true
-force = false
-only = false
+module DevBall
+	should_clean = false
+	clean_build_dirs = true
+	explicit_packages = nil
+	build = true
+	force = false
+	only = false
 
-push = false
-push_username = nil
-pull = false
-rsync_build = nil
+	push = false
+	push_username = nil
+	pull = false
+	rsync_build = nil
 
-ARGV.each {|arg|
-	if (match = /^--([^=]+)(=(.*))?$/.match(arg))
-		case match[1]
-		when "clean-install" # remove /nexopia/* before starting to give a clean slate
+	$build_dir = "/tmp/devball-build"
+	$install_base = nil
+
+	OptionParser.new do |opts|
+		opts.banner = "Usage: $0 [options] package_dir"
+	
+		opts.on("-b", "--build-dir BUILD_DIR", "Specify where to use as a scratch directory for building. Defaults to /tmp/devball-build") do |build_dir|
+			$build_dir = build_dir
+		end	
+		opts.on("-c", "--clean-install", "Remove built devball directory before starting.") do
 			should_clean = true
-		when "leave-build-dirs" # remove build directories after they're installed
+		end
+		opts.on("-L", "--leave-build-dirs", "Leave intermediate build directories alone after installing (for debugging)") do
 			clean_build_dirs = false
-		when "no-build" # don't build
+		end
+		opts.on("-N", "--no-build", "Don't actually build the devball.") do
 			build = false
-		when "only" # only build the packages specified on the command line, don't build their deps
+		end
+		opts.on("-o", "--only PKGNAME,PKGNAME,PKGNAME...", "Only build the packages specified on the command line (but not their deps)") do |pkgnames|
 			only = true
-		when "force" # build all elligable packages, even if they're already installed.
+			explicit_packages = pkgnames.collect do |pkgname|
+				if (regex_match = /^\/(.*)\/$/.match(pkgname))
+					Regexp.new(regex_match[1])
+				else
+					pkgname
+				end			
+			end
+		end
+		opts.on("-f", "--force", "Build ALL packages, even if they're already installed in the devball.") do
 			force = true
-		when "push"
-			if (!match[3])
-				raise "Must specify a build to push"
-			end
-			rsync_build = match[3]
-			push = true
-		when "username"
-			if (!match[3])
-				raise "Must specify a username"
-			end
-			push_username = match[3]
-		when "pull"
-			if (!match[3])
-				raise "Must specify a build to pull"
-			end
-			rsync_build = match[3]
-			pull = true
-			build = false
 		end
-	else
-		explicit_packages ||= []
-		if (regex_match = /^\/(.*)\/$/.match(arg))
-			explicit_packages.push(Regexp.new(regex_match[1]))
-		else
-			explicit_packages.push(arg)
+		opts.on("-n", "--name BUILD_NAME", "Name the build for pushing to rsync server.") do |build_name|
+			rsync_build = build_name
 		end
-		make_tarball = false # don't build a tarball if we're building only partial
-	end
-}
-
-$build_dir = ENV['BUILD_DIR'] || 'build'
-
-if (build)
-	packages = PkgSpec.load_packages("packages", explicit_packages, only);
-	if (!force)
-		packages.delete_if {|pkg| File.directory?("/nexopia/packages/#{pkg}") }
-	end
-	puts("Installing packages: #{packages.join(', ')}")
-
-	if (!system("mkdir", "-p", $build_dir))
-		puts("Could not create build directory.")
-		exit(150)
+		opts.on("-P", "--push RSYNC_SERVER", "Push to the rsync server specified with the build name specified in -n.") do |rsync_server|
+			push = rsync_server
+		end
+		opts.on("-u", "--username USERNAME", "Username to use when connecting to rsync.") do |username|
+			push_username = username
+		end
+		opts.on("-p", "--pull RSYNC_SERVER", "Pull a devball from the given rsync server and build name specified in -n.") do |rsync_server|
+			pull = rsync_server
+		end
 	end
 
-	if (File.exists?("/nexopia") && should_clean)
-		system("rm", "-rf", "/nexopia/*")
-	end
+	$package_dir = ARGV.shift || raise(ArgumentError, "No package directory specified.")
+	$install_base = "/#{$package_dir}"
 
-	if (!system("sudo", "mkdir", "-p", "/nexopia"))
-		puts("Could not create target directory.")
-		exit(250)
-	end
+	if (build)
+		packages = PkgSpec::Base.load_packages($package_dir, explicit_packages, only);
+		if (!force)
+			packages.delete_if {|pkg| File.directory?("#{$install_base}/packages/#{pkg}") }
+		end
+		puts("Installing packages: #{packages.join(', ')}")
 
-	if (!system("sudo", "chown", "#{ENV['USER']}:", "/nexopia"))
-		puts("Could not change ownership of target directory.")
-		exit(275)
-	end
+		if (!system("mkdir", "-p", $build_dir))
+			puts("Could not create build directory.")
+			exit(150)
+		end
 
-	# commonly needed environment variables.
-	ENV['CFLAGS'] = (ENV['CFLAGS'] || "") + " -I/nexopia/include -fPIC"
-	ENV['CXXFLAGS'] = (ENV['CXXFLAGS'] || "") + " -I/nexopia/include -fPIC"
-	ENV['LDFLAGS'] = (ENV['LDFLAGS'] || "") + " -L/nexopia/lib -fPIC"
-	ENV['PATH'] = '/nexopia/bin:' + (ENV['PATH'] || "")
-	ENV['RUBYOPT'] = '' # clear this out. It blows stuff up.
+		if (File.exists?($install_base) && should_clean)
+			system("rm", "-rf", "#{$install_base}/*")
+		end
 
-	packages.each {|package|
-		package.remove_build()
-		related_pkgs = []
-		begin
-			puts("Extracting #{package}")
-			package.step_extract()
-			puts("Patching #{package}")
-			package.step_patch()
-			puts("Setting environment for #{package}")
-			package.step_environment_setup()
-			puts("Configuring #{package}")
-			package.step_configure()
-			puts("Building #{package}")
-			package.step_build()
-			puts("Installing #{package}")
-			package.remove_install()
+		if (!system("mkdir", "-p", $install_base))
+			puts("Could not create target directory.")
+			puts("You will probably need to create the directory and set permissions yourself by running:")
+			puts("sudo mkdir -p #{$install_base}")
+			puts("sudo chown #{ENV['USER']}: #{$install_base}")
+			exit(250)
+		end
+
+		# commonly needed environment variables.
+		ENV['CFLAGS'] = (ENV['CFLAGS'] || "") + " -I#{$install_base}/include -fPIC"
+		ENV['CXXFLAGS'] = (ENV['CXXFLAGS'] || "") + " -I#{$install_base}/include -fPIC"
+		ENV['LDFLAGS'] = (ENV['LDFLAGS'] || "") + " -L#{$install_base}/lib -fPIC"
+		ENV['PATH'] = "#{$install_base}/bin:" + (ENV['PATH'] || "")
+		ENV['RUBYOPT'] = '' # clear this out. It blows stuff up.
+
+		packages.each {|package|
+			package.remove_build()
+			related_pkgs = []
 			begin
-				FileUtils.mkdir_p(package.package_install_dir) # precreate the package directory so it always exists.
-				related_pkgs = package.step_install()
-			rescue Exception
-				puts("Error installing #{package}. Cleaning up the install dir.")
+				puts("Extracting #{package}")
+				package.step_extract()
+				puts("Patching #{package}")
+				package.step_patch()
+				puts("Setting environment for #{package}")
+				package.step_environment_setup()
+				puts("Configuring #{package}")
+				package.step_configure()
+				puts("Building #{package}")
+				package.step_build()
+				puts("Installing #{package}")
 				package.remove_install()
-				system("rm", "-rf", package.package_install_dir)
-				raise
+				begin
+					FileUtils.mkdir_p(package.package_install_dir) # precreate the package directory so it always exists.
+					related_pkgs = package.step_install()
+				rescue Exception
+					puts("Error installing #{package}. Cleaning up the install dir.")
+					package.remove_install()
+					system("rm", "-rf", package.package_install_dir)
+					raise
+				end
+			ensure
+				if (clean_build_dirs)
+					puts("Removing build directory for #{package}")
+					package.remove_build()
+				end
 			end
-		ensure
-			if (clean_build_dirs)
-				puts("Removing build directory for #{package}")
-				package.remove_build()
+			puts("Setting up links for #{package}")
+			package.step_setup_links()
+			if (related_pkgs.kind_of?(Array))
+				related_pkgs.each {|related|
+					PkgSpec::Base.find(related).step_setup_links()
+				}
 			end
-		end
-		puts("Setting up links for #{package}")
-		package.step_setup_links()
-		if (related_pkgs.kind_of?(Array))
-			related_pkgs.each {|related|
-				PkgSpec.find(related).step_setup_links()
-			}
-		end
-	}
+		}
 
-	puts("Done installing packages #{packages.join(', ')}.")
-end
-if (push)
-	puts("Pushing devball to rsync server (will ask for your officebackup password)")
-	if (!push_username)
-		push_username = ENV['USER']
-		puts("No username specified (with --username), using system default of #{ENV['USER']}")
+		puts("Done installing packages #{packages.join(', ')}.")
 	end
-	system("rsync", "-a", "--delete", "/nexopia/packages", "rsync://#{push_username}@officebackup/write-#{rsync_build}")
-end
-	
-if (pull)
-	puts("Pulling devball from rsync server")
-	system("rsync", "-a", "--delete", "rsync://officebackup/#{rsync_build}", "/nexopia")
-	
-	# now take the list of packages we pulled down, load their package objects, and setup links.
-	packages = PkgSpec.load_packages("packages", nil, false);
-	Dir["/nexopia/packages/*"].each {|pkg_name|
-		pkg_name = %r{/([^/]+)$}.match(pkg_name)[1]
-		package = PkgSpec.find(pkg_name)
-		if (!package)
-			raise "Unknown package #{pkg_name} pulled from devball server."
+	if (push)
+		puts("Pushing devball to rsync server (will ask for your officebackup password)")
+		if (!push_username)
+			push_username = ENV['USER']
+			puts("No username specified (with --username), using system default of #{ENV['USER']}")
 		end
-		puts("Setting up links for #{pkg_name}")
-		package.step_setup_links()
-	}
+		system("rsync", "-a", "--delete", "#{$install_base}/packages", "rsync://#{push_username}@officebackup/write-#{rsync_build}")
+	end
+	
+	if (pull)
+		puts("Pulling devball from rsync server")
+		system("rsync", "-a", "--delete", "rsync://officebackup/#{rsync_build}", "#{$install_base}")
+	
+		# now take the list of packages we pulled down, load their package objects, and setup links.
+		packages = PkgSpec::Base.load_packages($package_dir, nil, false);
+		Dir["#{$install_base}/packages/*"].each {|pkg_name|
+			pkg_name = %r{/([^/]+)$}.match(pkg_name)[1]
+			package = PkgSpec::Base.find(pkg_name)
+			if (!package)
+				raise "Unknown package #{pkg_name} pulled from devball server."
+			end
+			puts("Setting up links for #{pkg_name}")
+			package.step_setup_links()
+		}
+	end
 end

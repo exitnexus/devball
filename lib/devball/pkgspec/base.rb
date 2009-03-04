@@ -11,7 +11,7 @@
 # - remove_build
 # - remove_install
 # Derived classes should also describe their dependency tree through the
-# PkgSpec.depends_on function.
+# PkgSpec::Base.depends_on function.
 require 'fileutils'
 module DevBall
 	module PkgSpec
@@ -112,7 +112,7 @@ module DevBall
 				def set_ball(name, required = true)
 					@ball = name
 					@instance = self.new
-					PkgSpec.register_package(@instance, @instance.package_name, required)
+					PkgSpec::Base.register_package(@instance, @instance.package_name, required)
 				end
 				# defines it as a library that is only required if somethind depended on it.
 				def set_lib_ball(name)
@@ -133,13 +133,13 @@ module DevBall
 			end
 			def recursive_depends_on
 				return self.class.depends_on.collect {|dep|
-					pkg = PkgSpec.find(dep) || raise(PackageLoadError, "Package #{to_s} depends on #{dep} which doesn't exist.")
+					pkg = PkgSpec::Base.find(dep) || raise(PackageLoadError, "Package #{to_s} depends on #{dep} which doesn't exist.")
 					[pkg.recursive_depends_on, dep]
 				}.flatten
 			end
 	
 			def ball_file_name()
-				return "packages/#{ball}"
+				return "#{$package_dir}/#{ball}"
 			end
 			# extracts the ball to the correct place in the builddir
 			def step_extract()
@@ -151,7 +151,7 @@ module DevBall
 					orig = Dir.getwd
 					Dir.chdir(build_dir_name) {|dir|
 						self.class.patches.each {|patch|
-							system("patch -p1 < #{orig}/packages/#{patch}") || raise(PatchFailed, "Patch #{patch} failed to apply. Errno #{$?}")
+							system("patch -p1 < #{orig}/#{$package_dir}/#{patch}") || raise(PatchFailed, "Patch #{patch} failed to apply. Errno #{$?}")
 						}
 					}
 				end
@@ -188,7 +188,7 @@ module DevBall
 	
 			# Returns the directory the package will be installed in.
 			def package_install_dir()
-				return "/nexopia/packages/#{package_name}"
+				return "#{$install_base}/packages/#{package_name}"
 			end
 	
 			# configure options to pass to ./configure. The default step_configure function
@@ -207,7 +207,7 @@ module DevBall
 			end
 	
 			# do the configure step. The only requirement is that this end up installing things
-			# in /nexopia/packages/#{package_name}. The default implementation runs ./configure in
+			# in /$install_base/packages/#{package_name}. The default implementation runs ./configure in
 			# the build dir with the results of configure_params.
 			def step_configure()
 				Dir.chdir(build_dir_name) {|dir|
@@ -267,7 +267,7 @@ module DevBall
 	
 			def install_service_links(base_from)
 				Dir[File.join(base_from, "*")].each {|service|
-					supervise_dir = File.join("/var/nexopia/supervise", File.basename(service))
+					supervise_dir = File.join("/var#{$install_base}/supervise", File.basename(service))
 					begin
 						File.delete(File.join(service, "supervise"))
 					rescue; end
@@ -305,29 +305,29 @@ module DevBall
 	
 			# Build the appropriate links for the package so it can be run properly from /nexopia
 			def step_setup_links()
-				install_links(package_install_dir, "/nexopia", nil)
-				FileUtils.mkdir_p("/nexopia/bin")
-				install_links(File.join(package_install_dir, "bin"), "/nexopia/bin", "")
-				install_links(File.join(package_install_dir, "sbin"), "/nexopia/bin", "")
-				install_links(File.join(package_install_dir, "libexec"), "/nexopia/bin", "")
-				FileUtils.mkdir_p("/nexopia/lib")
-				install_links(File.join(package_install_dir, "lib"), "/nexopia/lib", "")
-				FileUtils.mkdir_p("/nexopia/include")
-				install_links(File.join(package_install_dir, "include"), "/nexopia/include", "")
-				FileUtils.mkdir_p("/nexopia/man")
-				install_links(File.join(package_install_dir, "man"), "/nexopia/man", "")
-				FileUtils.mkdir_p("/nexopia/etc")
-				install_links(File.join(package_install_dir, "etc"), "/nexopia/etc", "")
+				install_links(package_install_dir, "#{$install_base}", nil)
+				FileUtils.mkdir_p("#{$install_base}/bin")
+				install_links(File.join(package_install_dir, "bin"), "#{$install_base}/bin", "")
+				install_links(File.join(package_install_dir, "sbin"), "#{$install_base}/bin", "")
+				install_links(File.join(package_install_dir, "libexec"), "#{$install_base}/bin", "")
+				FileUtils.mkdir_p("#{$install_base}/lib")
+				install_links(File.join(package_install_dir, "lib"), "#{$install_base}/lib", "")
+				FileUtils.mkdir_p("#{$install_base}/include")
+				install_links(File.join(package_install_dir, "include"), "#{$install_base}/include", "")
+				FileUtils.mkdir_p("#{$install_base}/man")
+				install_links(File.join(package_install_dir, "man"), "#{$install_base}/man", "")
+				FileUtils.mkdir_p("#{$install_base}/etc")
+				install_links(File.join(package_install_dir, "etc"), "#{$install_base}/etc", "")
 		
-				FileUtils.mkdir_p("/nexopia/service-privileged")
+				FileUtils.mkdir_p("#{$install_base}/service-privileged")
 				install_service_links(File.join(package_install_dir, "service-privileged"))
-				install_links(File.join(package_install_dir, "service-privileged"), "/nexopia/service-privileged", "")
-				FileUtils.mkdir_p("/nexopia/service-required")
+				install_links(File.join(package_install_dir, "service-privileged"), "#{$install_base}/service-privileged", "")
+				FileUtils.mkdir_p("#{$install_base}/service-required")
 				install_service_links(File.join(package_install_dir, "service-required"))
-				install_links(File.join(package_install_dir, "service-required"), "/nexopia/service-required", "")
-				FileUtils.mkdir_p("/nexopia/service-optional")
+				install_links(File.join(package_install_dir, "service-required"), "#{$install_base}/service-required", "")
+				FileUtils.mkdir_p("#{$install_base}/service-optional")
 				install_service_links(File.join(package_install_dir, "service-optional"))
-				install_links(File.join(package_install_dir, "service-optional"), "/nexopia/service-optional", "")
+				install_links(File.join(package_install_dir, "service-optional"), "#{$install_base}/service-optional", "")
 			end
 	
 			def remove_build()

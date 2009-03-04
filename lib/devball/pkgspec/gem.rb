@@ -31,7 +31,7 @@ module DevBall
 			end
 	
 			def step_install()
-				Dir.chdir("packages") {|dir|
+				Dir.chdir($package_dir) {|dir|
 					params = configure_params.collect {|key, val|
 						if (val)
 							"--#{key}=#{val}"
