@@ -12,6 +12,7 @@ spec = Gem::Specification.new do |s|
     s.platform   = Gem::Platform::RUBY
     s.summary    = "A tool for building a self-contained set of packages that can be portably be moved from one binary-compatible machine to another."
     s.files      = FileList["{bin,lib}/**/*"].exclude("rdoc").to_a
+		s.executables = ['devball-build']
     s.require_path      = "lib"
     s.has_rdoc          = true
     s.extra_rdoc_files  = ['README']
