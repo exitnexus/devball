@@ -21,7 +21,7 @@ module DevBall
 	$install_base = nil
 
 	OptionParser.new do |opts|
-		opts.banner = "Usage: $0 [options] package_dir"
+		opts.banner = "Usage: #{$0} [options] package_dir"
 	
 		opts.on("-b", "--build-dir BUILD_DIR", "Specify where to use as a scratch directory for building. Defaults to /tmp/devball-build") do |build_dir|
 			$build_dir = build_dir
@@ -60,7 +60,12 @@ module DevBall
 		opts.on("-p", "--pull RSYNC_SERVER", "Pull a devball from the given rsync server and build name specified in -n.") do |rsync_server|
 			pull = rsync_server
 		end
-	end
+		
+		opts.on("-h", "--help", "Show help screen") do
+			puts opts
+			exit(0)
+		end
+	end.parse!(ARGV)
 
 	$package_dir = ARGV.shift || raise(ArgumentError, "No package directory specified.")
 	$install_base = "/#{$package_dir}"
