@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+if (File.exists?("#{__FILE__}-#{ARGV[0]}"))
+	$0 += " " + ARGV[0]
+	load("#{__FILE__}-#{ARGV.shift}")
+	exit(0)
+end
+
+puts("Unknown devball command #{ARGV[0]}")
+exit(1)

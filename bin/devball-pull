@@ -1,0 +1,66 @@
+#!/usr/bin/env ruby
+# Pushed a built devball to an rsync target for later fetching by devball-pull
+
+require 'devball/initialization'
+
+module DevBall
+	config = {
+#		:path => nil,
+#		:username => nil,
+#		:build_name => nil,
+#		:no_push => nil,
+	}
+	
+	configure do |opts|
+		opts.banner += "\n Will pull from {TARGET_PATH}{BUILD_NAME}."
+		
+		opts.on("-n", "--name BUILD_NAME", "Name the build for pushing to rsync server.") do |build_name|
+			config[:build_name] = build_name
+		end
+		opts.on("-p", "--path TARGET_PATH", "Push to the rsync path specified with the build name specified in -n.") do |rsync_server|
+			config[:path] = rsync_server
+		end
+		opts.on("-u", "--username USERNAME", "Username to use when connecting to rsync.") do |username|
+			config[:username] = username
+		end
+		opts.on("-N", "--no-pull", "Don't actually pull, just tell me where it'll be pushing to.") do 
+			config[:no_pull] = true
+		end
+	end
+	
+	config = $config[:rsync][:pull].merge(config) if ($config[:rsync] && $config[:rsync][:pull])
+	
+	if (!config[:build_name] || !config[:path])
+		puts("You must specify a build name and rsync path to push to.")
+		exit(1)
+	end
+	
+	if (config[:username])
+		config[:path] = config[:path].gsub(%r{^rsync://}, "rsync://#{config[:username]}@")
+	end
+
+	puts("Pulling devball from rsync path #{config[:path]}#{config[:build_name]}")
+	exit(0) if config[:no_pull]
+	
+	if (!system("mkdir", "-p", $install_base))
+		puts("Could not create target directory.")
+		puts("You will probably need to create the directory and set permissions yourself by running:")
+		puts("sudo mkdir -p #{$install_base}")
+		puts("sudo chown #{ENV['USER']}: #{$install_base}")
+		exit(250)
+	end
+
+	system("rsync", "-a", "--delete", "#{config[:path]}#{config[:build_name]}", "#{$install_base}")
+
+	# now take the list of packages we pulled down, load their package objects, and setup links.
+	packages = PkgSpec::Base.load_packages($package_dir, nil, false);
+	Dir["#{$install_base}/packages/*"].each {|pkg_name|
+		pkg_name = %r{/([^/]+)$}.match(pkg_name)[1]
+		package = PkgSpec::Base.find(pkg_name)
+		if (!package)
+			raise "Unknown package #{pkg_name} pulled from devball server."
+		end
+		puts("Setting up links for #{pkg_name}")
+		package.step_setup_links()
+	}
+end

@@ -1,9 +1,6 @@
 #!/usr/bin/env ruby
 # Builds our package environment based on the .pkgspec files in packages
 
-require 'optparse'
-require 'yaml'
-require 'devball/pkgspec/base'
 require 'devball/initialization'
 
 module DevBall
@@ -13,11 +10,6 @@ module DevBall
 	build = true
 	force = false
 	only = false
-
-	push = false
-	push_username = nil
-	pull = false
-	rsync_build = nil
 
 	$build_dir = "/tmp/devball-build"
 
@@ -46,18 +38,6 @@ module DevBall
 		end
 		opts.on("-f", "--force", "Build ALL packages, even if they're already installed in the devball.") do
 			force = true
-		end
-		opts.on("-n", "--name BUILD_NAME", "Name the build for pushing to rsync server.") do |build_name|
-			rsync_build = build_name
-		end
-		opts.on("-P", "--push RSYNC_SERVER", "Push to the rsync server specified with the build name specified in -n.") do |rsync_server|
-			push = rsync_server
-		end
-		opts.on("-u", "--username USERNAME", "Username to use when connecting to rsync.") do |username|
-			push_username = username
-		end
-		opts.on("-p", "--pull RSYNC_SERVER", "Pull a devball from the given rsync server and build name specified in -n.") do |rsync_server|
-			pull = rsync_server
 		end
 	end
 	

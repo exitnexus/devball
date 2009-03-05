@@ -4,4 +4,11 @@ This is a tool for building a devball. A devball is a self-contained set of pack
 
 Usage
 ---
-(tbd)
+- Create a directory with pkgspecs and the accompanying tarballs/gem files/etc.
+- Run "devball build {path}" to build the packages and setup the devball directory
+- Use "devball push -p {rsync target} -n {build name}" to push your devball into an rsync repository
+- Use "devball pull -p {rsync target} -n {build name}" to pull a devball down from an rsync repository
+
+Examples
+---
+(To be added)

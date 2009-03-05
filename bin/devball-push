@@ -1,0 +1,46 @@
+#!/usr/bin/env ruby
+# Pushed a built devball to an rsync target for later fetching by devball-pull
+
+require 'devball/initialization'
+
+module DevBall
+	config = {
+#		:path => nil,
+#		:username => nil,
+#		:build_name => nil,
+#		:no_push => nil,
+	}
+	
+	configure do |opts|
+		opts.banner += "\n Will push to {TARGET_PATH}{BUILD_NAME}.\n Must have a built devball to push anything."
+		
+		opts.on("-n", "--name BUILD_NAME", "Name the build for pushing to rsync server.") do |build_name|
+			config[:build_name] = build_name
+		end
+		opts.on("-p", "--path TARGET_PATH", "Push to the rsync path specified with the build name specified in -n.") do |rsync_server|
+			config[:path] = rsync_server
+		end
+		opts.on("-u", "--username USERNAME", "Username to use when connecting to rsync.") do |username|
+			config[:username] = username
+		end
+		opts.on("-N", "--no-push", "Don't actually push, just tell me where it'll be pushing to.") do 
+			config[:no_push] = true
+		end
+	end
+
+	config = $config[:rsync][:push].merge(config) if ($config[:rsync] && $config[:rsync][:push])
+
+	if (!config[:build_name] || !config[:path])
+		puts("You must specify a build name and rsync path to push to.")
+		exit(1)
+	end
+	
+	if (config[:username])
+		config[:path] = config[:path].gsub(%r{^rsync://}, "rsync://#{config[:username]}@")
+	end
+
+	puts("Pushing devball to rsync path #{config[:path]}#{config[:build_name]}")
+	exit(0) if config[:no_push]
+
+	system("rsync", "-a", "--delete", "#{$install_base}/packages", "#{config[:path]}#{config[:build_name]}")
+end
