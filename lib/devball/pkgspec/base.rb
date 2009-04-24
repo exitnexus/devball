@@ -53,7 +53,7 @@ module DevBall
 					@packages ||= {}
 					@install_packages ||= {}
 					Dir["#{dir}/*.pkgspec"].each {|f|
-						load "#{Dir.getwd}/#{f}"
+						load "#{f}"
 					}
 
 					def explicit.include?(str)
@@ -139,7 +139,7 @@ module DevBall
 			end
 	
 			def ball_file_name()
-				return "#{$package_dir}/#{ball}"
+				return "#{ball}"
 			end
 			# extracts the ball to the correct place in the builddir
 			def step_extract()
@@ -151,7 +151,7 @@ module DevBall
 					orig = Dir.getwd
 					Dir.chdir(build_dir_name) {|dir|
 						self.class.patches.each {|patch|
-							system("patch -p1 < #{orig}/#{$package_dir}/#{patch}") || raise(PatchFailed, "Patch #{patch} failed to apply. Errno #{$?}")
+							system("patch -p1 < #{orig}/#{patch}") || raise(PatchFailed, "Patch #{patch} failed to apply. Errno #{$?}")
 						}
 					}
 				end
