@@ -1,10 +1,9 @@
-0.6
-~~~
+== 0.7
+bug - Executables not installed properly
 
+== 0.6
 minor - Update Rakefile
 
 
-0.5
-~~~
-
+== 0.5
 bug - Fixed use of directories
