@@ -1,5 +1,5 @@
 require 'rubygems'
-require 'rubygems/package_task'
+require 'rake/gempackagetask'
 
 GEM_VERSION = ENV['GEM_VERSION'] || `git describe`.gsub(/-([0-9]+)-[a-z0-9]+$/, '.\1')
 
@@ -18,7 +18,7 @@ spec = Gem::Specification.new do |s|
 	s.rubyforge_project = "nexopia"
 end
 
-Gem::PackageTask.new(spec) do |pkg|
+Rake::GemPackageTask.new(spec) do |pkg|
 end
 
 task :default => [:package]
