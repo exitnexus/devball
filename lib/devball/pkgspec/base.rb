@@ -114,7 +114,7 @@ module DevBall
 					@instance = self.new
 					PkgSpec::Base.register_package(@instance, @instance.package_name, required)
 				end
-				# defines it as a library that is only required if somethind depended on it.
+				# defines it as a library that is only required if something depended on it.
 				def set_lib_ball(name)
 					set_ball(name, false)
 				end
